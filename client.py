@@ -2,7 +2,7 @@ import random;
 import string;
 import sys;
 import config;
-from message_type import MessageType;
+from message_type import *;
 from utils import *;
 from twisted.internet.protocol import DatagramProtocol
 from twisted.internet import reactor;
@@ -22,39 +22,32 @@ class ClientDatagramProtocol(DatagramProtocol):
 
         self.message = None;
 
-    def generate_message(self, char_list = string.digits+string.ascii_letters, size = 1):
-        self.message = ''.join(random.choices(char_list, k=size));
+    def generate_client_message(self, replica_id, char_list = string.digits+string.ascii_letters, size = 1):
+        if self.message is None:
+            self.message = ''.join(random.choices(char_list, k=size));
         self.sequence = self.sequence + 1;
-    
-    def format_message(self, message_type):
-        formatted_message = '';
-        if message_type == MessageType.CLIENT_PROPOSE.value:
-            #<message_type, client_id, sequence, message>
-            formatted_message = "{0} {1} {2} {3}".format(message_type, self.id, self.sequence, self.message);
-        else:
-            #<message_type, client_id, sequence>
-            formatted_message = "{0} {1} {2}".format(message_type, self.id, self.sequence);
-            
-        #print(formatted_message);
-        return formatted_message;
 
+        return ClientMessage(self.id, self.sequence, self.message, replica_id);
+    
     def startProtocol(self):
         #self.transport.connect(self.host, self.port);
-        # print("Client has connected to the host %s %d" % (self.host,self.port));
         print("Client #%d initiated at %s %d" % (self.id, self.host,self.port));
         self.broadcast_message(MessageType.CLIENT_PROPOSE.value);
     
     def datagramReceived(self, data, from_address):
         print("received %r from %s:%d" % (data.decode(), from_address[0], from_address[1]));
 
-    def send_message(self, message_type, to_address):
-        if self.message is None:
-            self.generate_message();
-        self.transport.write( self.format_message(message_type).encode(), to_address);
+    def send_message(self, message_type, replica):
+        to_address = (replica["host"], replica["port"])
+        
+        if message_type == MessageType.CLIENT_PROPOSE.value:
+            client_message = self.generate_client_message(replica["id"]);
+        
+        self.transport.write( str(client_message).encode(), to_address);
     
     def broadcast_message(self, message_type):
         for replica in self.replica_list:
-            self.send_message(message_type, (replica["host"],replica["port"]));
+            self.send_message(message_type, replica);
 
 def main():
     argv = process_argv(sys.argv);

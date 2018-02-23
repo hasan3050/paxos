@@ -1,6 +1,7 @@
 import sys;
 import os;
 import re;
+from message_type import *;
 
 def process_argv(argv):
     options = {};

@@ -1,3 +1,5 @@
+from message_type import *;
+
 class Proposer ():
     leader               = False
     proposed_value       = None 
@@ -7,7 +9,6 @@ class Proposer ():
     nacks_received       = None #set
     current_prepare_msg  = None #<id, <highest_proposal_id_no, id> >
     current_accept_msg   = None #<id, <highest_proposal_id_no, id>, proposed_value >
-
     
     def __init__(self, id, quorum_size, is_leader = False):
         self.id = id
@@ -26,12 +27,12 @@ class Proposer ():
 
         return self.current_prepare_msg
 
-    def propose_value(self, value):
+    def propose_value(self, value, slot):
         if self.proposed_value is None:
             self.proposed_value = value
             
             if self.leader:
-                self.current_accept_msg = (self.id, self.proposal_id, self.proposed_value)
+                self.current_accept_msg = AcceptMessage(self.id, self.proposal_id, self.proposed_value, slot)
                 return self.current_accept_msg
 
     def observe_proposal(self, proposal_id):
@@ -39,30 +40,30 @@ class Proposer ():
             self.highest_proposal_id = proposal_id
 
             
-    # def receive_nack(self, message):
-    #     self.observe_proposal( message.promised_proposal_id )
+    def receive_nack(self, message):
+        self.observe_proposal( message.promised_id )
         
-    #     if message.proposal_id == self.proposal_id and self.nacks_received is not None:
-    #         self.nacks_received.add( message.from_uid )
+        if message.proposal_id == self.proposal_id and self.nacks_received is not None:
+            self.nacks_received.add( message.acceptor_id )
 
-    #         if len(self.nacks_received) == self.quorum_size:
-    #             return self.prepare() # Lost leadership or failed to acquire it
+            if len(self.nacks_received) == self.quorum_size:
+                return self.prepare() # Lost leadership or failed to acquire it
 
-    # def receive_promise(self, msg):
-    #     self.observe_proposal( msg.proposal_id )
+    def receive_promise(self, message):
+        self.observe_proposal( message.proposal_id )
 
-    #     if not self.leader and msg.proposal_id == self.proposal_id and msg.from_uid not in self.promises_received:
+        if not self.leader and message.proposal_id == self.proposal_id and message.acceptor_id not in self.promises_received:
 
-    #         self.promises_received.add( msg.from_uid )
+            self.promises_received.add( message.acceptor_id )
 
-    #         if msg.last_accepted_id > self.highest_accepted_id:
-    #             self.highest_accepted_id = msg.last_accepted_id
-    #             if msg.last_accepted_value is not None:
-    #                 self.proposed_value = msg.last_accepted_value
+            if message.last_accepted_id is not None and (self.highest_accepted_id is None or message.last_accepted_id > self.highest_accepted_id):
+                self.highest_accepted_id = message.last_accepted_id
+                if message.last_accepted_value is not None:
+                    self.proposed_value = message.last_accepted_value
 
-    #         if len(self.promises_received) == self.quorum_size:
-    #             self.leader = True
+            if len(self.promises_received) == self.quorum_size:
+                self.leader = True
 
-    #             if self.proposed_value is not None:
-    #                 self.current_accept_msg = Accept(self.network_uid, self.proposal_id, self.proposed_value)
-    #                 return self.current_accept_msg
+                if self.proposed_value is not None:
+                    self.current_accept_msg = AcceptMessage(self.id, self.proposal_id, self.proposed_value, message.slot)
+                    return self.current_accept_msg

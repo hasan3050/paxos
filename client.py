@@ -22,12 +22,11 @@ class ClientDatagramProtocol(DatagramProtocol):
 
         self.message = None;
 
-    def generate_client_message(self, replica_id, char_list = string.digits+string.ascii_letters, size = 1):
-        if self.message is None:
-            self.message = ''.join(random.choices(char_list, k=size));
-        self.sequence = self.sequence + 1;
+    def generate_client_message(self, char_list = string.digits+string.ascii_letters, size = 1):
+        self.message = ''.join(random.choices(char_list, k=size));
+        self.sequence += 1;
 
-        return ClientMessage(self.id, self.sequence, self.message, replica_id);
+        return ClientMessage(self.id, self.sequence, self.message);
     
     def startProtocol(self):
         #self.transport.connect(self.host, self.port);
@@ -35,19 +34,24 @@ class ClientDatagramProtocol(DatagramProtocol):
         self.broadcast_message(MessageType.CLIENT_PROPOSE.value);
     
     def datagramReceived(self, data, from_address):
-        print("received %r from %s:%d" % (data.decode(), from_address[0], from_address[1]));
+        print("Client received %r from %s:%d" % (data.decode(), from_address[0], from_address[1]));
+        if data.decode() is not None:
+            message_tokens = data.decode().split(' ');
+            message_type = int(message_tokens[0]);
 
-    def send_message(self, message_type, replica):
+            if message_type == MessageType.DONE.value and self.sequence < 5:
+                self.broadcast_message(MessageType.CLIENT_PROPOSE.value);
+
+    def send_message(self, client_message, replica):
         to_address = (replica["host"], replica["port"])
-        
-        if message_type == MessageType.CLIENT_PROPOSE.value:
-            client_message = self.generate_client_message(replica["id"]);
-        
         self.transport.write( str(client_message).encode(), to_address);
     
     def broadcast_message(self, message_type):
+        if message_type == MessageType.CLIENT_PROPOSE.value:
+            client_message = self.generate_client_message();
+        
         for replica in self.replica_list:
-            self.send_message(message_type, replica);
+            self.send_message(str(client_message), replica);
 
 def main():
     argv = process_argv(sys.argv);

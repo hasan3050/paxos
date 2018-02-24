@@ -19,7 +19,7 @@ class Acceptor ():
             self.promised_id     = message.proposal_id
             self.accepted_id     = message.proposal_id
             self.accepted_value  = message.proposal_value
-            return AcceptedMessage(self.id, message.proposal_id, message.proposal_value);
+            return AcceptedMessage(self.id, self.accepted_id, self.accepted_value, message.proposer_id, message.slot);
         else:
             return NackMessage(self.id, self.promised_id, message.proposer_id, message.proposal_id, message.slot);
 

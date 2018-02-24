@@ -13,8 +13,9 @@ class ServerDatagramProtocol(DatagramProtocol):
         self.port = port;
         self.log = log;
         self.replicas = replicas;
-        self.paxos = PaxosInstance(self.id, len(self.replicas)/2+1, is_leader=(self.id ==0));
+        self.paxos = PaxosInstance(self.id, int(len(self.replicas)/2)+1, is_leader=(self.id ==0));
         self.slot = 0;
+        self.message_pool = []; #(ClientMessage)
 
     def startProtocol(self):
         #self.transport.connect(self.host, self.port);
@@ -34,19 +35,42 @@ class ServerDatagramProtocol(DatagramProtocol):
             elif message_type == MessageType.PROMISE.value:
                 self.receive_promise(data.decode(), from_address);
 
+            elif message_type == MessageType.ACCEPT.value:
+                self.receive_accept(data.decode(), from_address);
+
+            elif message_type == MessageType.ACCEPTED.value:
+                self.receive_accepted(data.decode(), from_address);
+
             elif message_type == MessageType.NACK.value:
                 self.receive_nack(data.decode(), from_address);
-                
-    def _send(self, message, to_id):
-        self.transport.write(message.encode(), (self.replicas[to_id][0],self.replicas[to_id][1]) );
+
+    def save_state(self):
+        #TO DO: save state to the log file 
+        return
+
+    def advance_slot(self, new_slot, new_value):
+        print("replica #{0} has accepted {1} at slot#{2}".format(self.id, new_value, new_slot));
+        self.save_state();
+        _is_leader = self.paxos.leader;
+        self.paxos = PaxosInstance(self.id, int(len(self.replicas)/2)+1, is_leader= _is_leader);
+        self.slot = new_slot;
+        self.send_done();
+        return
+
+    def _send(self, message, to_id, is_client=False):
+        (host,port) = (self.replicas[to_id][0],self.replicas[to_id][1]) if is_client == False else config.clients[to_id]
+        self.transport.write(message.encode(), (host,port) );
     
     def receive_propose(self, message, from_address):
         if self.paxos.leader:
             #<message_type, client_id, sequence, message, replica_id>
             client_message = parse_str_message(message, MessageClass.CLIENT_MESSAGE.value);
+            self.message_pool.append(client_message)
             print("replica #%d received propose message %r from %s:%d" % (self.id, message, from_address[0], from_address[1]));
             #self.transport.write("{0} {1}".format( MessageType.LEADER_ACK_PROPOSE.value, message_tokens[1]).encode(), (self.host, self.port));
             
+            if self.paxos.proposed_value is None:
+                self.paxos.propose_value(client_message.message, self.slot);
             (replica_id, proposal_id) = self.paxos.prepare();
             prepare_message = PrepareMessage(replica_id, proposal_id, self.slot); 
             self.send_prepare(prepare_message);
@@ -56,7 +80,7 @@ class ServerDatagramProtocol(DatagramProtocol):
             self._send(str(prepare_message), replica_id);
     
     def receive_prepare(self, message, from_address):
-        print("replica #%d received prepare message %r" % (self.id, message));
+        #print("replica #%d received prepare message %r" % (self.id, message));
         prepare_message = parse_str_message(message, MessageClass.PREPARE_MESSAGE.value);
         if prepare_message.slot != self.slot:
             return
@@ -64,40 +88,83 @@ class ServerDatagramProtocol(DatagramProtocol):
         m = self.paxos.receive_prepare(prepare_message)
         
         if isinstance(m, PromiseMessage):
+            self.save_state();
             #self.save_state(self.slot, self.current_value, m.proposal_id,
             #                m.last_accepted_id, m.last_accepted_value)
             
             self.send_promise(m);
-        else:
-            self.send_nack(from_uid, self.slot, proposal_id, self.promised_id)
+        elif isinstance(m, NackMessage):
+            self.send_nack(m);
 
     def send_promise(self, promise_message):
         self._send(str(promise_message), promise_message.proposer_id)
 
     def receive_promise(self, message, from_address):
-        print("replica #%d received promise message %r" % (self.id, message));
-        # TO DO: need to implement receive promise logic
+        #print("replica #%d received promise message %r" % (self.id, message));
+        
+        promise_message = parse_str_message(message, MessageClass.PROMISE_MESSAGE.value)
+        
+        if promise_message.slot != self.slot:
+            return
 
-    def send_nack(self, nack_message, from_address):
+        m = self.paxos.receive_promise(promise_message)
+        
+        if isinstance(m, AcceptMessage):
+            self.send_accept(m)
+
+    def send_nack(self, nack_message):
         self._send(str(nack_message), nack_message.proposer_id)
     
-    def receive_nack(self, message):
-        print("replica #%d received nack message %r" % (self.id, message));
+    def receive_nack(self, message, from_address):
+        # print("replica #%d received nack message %r" % (self.id, message));
         # TO DO: need to implement receive nack logic
-
-    def save_state(self):
-        #TO DO: save state to the log file 
         return
 
-    # def send_accept(self, peer_uid, instance_number, proposal_id, proposal_value):
-    #     self._send(peer_uid, 'accept', instance_number = instance_number,
-    #                                    proposal_id     = proposal_id,
-    #                                    proposal_value  = proposal_value)
+    def send_accept(self, accept_message):
+        for replica_id in self.replicas:
+            self._send( str(accept_message), replica_id);
+    
+    def receive_accept(self, message, from_address):
+        #print("replica #%d received accept message %r" % (self.id, message));
 
-    # def send_accepted(self, peer_uid, instance_number, proposal_id, proposal_value):
-    #     self._send(peer_uid, 'accepted', instance_number = instance_number,
-    #                                      proposal_id     = proposal_id,
-    #                                      proposal_value  = proposal_value)
+        accept_message = parse_str_message(message, MessageClass.ACCEPT_MESSAGE.value);
+        
+        if accept_message.slot != self.slot:
+            return
+        
+        m = self.paxos.receive_accept(accept_message)
+        
+        if isinstance(m, AcceptedMessage):
+            self.save_state();
+            # self.save_state(self.instance_number, self.current_value, self.promised_id,
+            #                 proposal_id, proposal_value)
+            self.send_accepted(m);
+        elif isinstance(m, NackMessage):
+            self.send_nack(m);
+
+    def send_accepted(self, accepted_message):
+        for replica_id in self.replicas:
+            self._send( str(accepted_message), replica_id); 
+
+    def receive_accepted(self, message, from_address):
+        #print("replica #%d received accepted message %r" % (self.id, message));
+        
+        accepted_message = parse_str_message(message, MessageClass.ACCEPTED_MESSAGE.value);
+
+        if accepted_message.slot != self.slot:
+            return
+
+        m = self.paxos.receive_accepted(accepted_message)
+        
+        if isinstance(m, Resolution):
+            self.advance_slot( self.slot + 1, m.accepted_value )
+
+    def send_done(self):
+        if len(self.message_pool) > 0:
+            client_message = self.message_pool.pop(0);
+            done_message = "{0} {1} {2} {3}".format(MessageType.DONE.value, 
+                client_message.client_sequence, client_message.message, self.id);
+            self._send( str(done_message), client_message.client_id, is_client=True)
 
 def main():
     argv = process_argv(sys.argv);

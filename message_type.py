@@ -17,6 +17,7 @@ class MessageClass(Enum):
     ACCEPT_MESSAGE = 3
     ACCEPTED_MESSAGE = 4 
     NACK_MESSAGE = 5
+    DONE_MESSAGE = 6
 
 class ClientMessage:
     def __init__(self, client_id, client_sequence, message):
@@ -98,6 +99,16 @@ class NackMessage:
             self.message_type, self.acceptor_id, self.promised_id[0], self.promised_id[1], 
             self.proposer_id, self.proposal_id[0], self.proposal_id[1], self.slot);
 
+class DoneMessage: 
+    def __init__(self, client_sequence, message, leader_id) : 
+        self.client_sequence = client_sequence;
+        self.message = message;
+        self.leader_id = leader_id;
+        self.message_type = MessageType.DONE.value;
+    
+    def __str__(self):
+        return "{0} {1} {2} {3}".format(self.message_type, self.client_sequence, self.message, self.leader_id);
+
 class Resolution:
     def __init__(self, id, accepted_value, slot):
         self.id = id;
@@ -127,3 +138,7 @@ def parse_str_message(message, message_class):
     elif message_class == MessageClass.ACCEPTED_MESSAGE.value and tokens is not None and len(tokens) == 7:
         #acceptor_id, proposal_id, accepted_value, proposer_id, slot
         return AcceptedMessage( int(tokens[1]), (int(tokens[2]), int(tokens[3])), tokens[4], int(tokens[5]), int(tokens[6]));
+    
+    elif message_class == MessageClass.DONE_MESSAGE.value and tokens is not None and len(tokens) == 4:
+        #client_sequence, message, leader_id
+        return DoneMessage( int(tokens[1]), (tokens[2]), int(tokens[3]) );

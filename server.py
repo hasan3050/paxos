@@ -58,7 +58,10 @@ class ServerDatagramProtocol(DatagramProtocol):
         return
 
     def _send(self, message, to_id, is_client=False):
-        (host,port) = (self.replicas[to_id][0],self.replicas[to_id][1]) if is_client == False else config.clients[to_id]
+        if is_client == False:
+            (host,port) = (self.replicas[to_id][0],self.replicas[to_id][1]) 
+        if is_client == True:
+            (host, port) = (config.clients[to_id][0],config.clients[to_id][1])
         self.transport.write(message.encode(), (host,port) );
     
     def receive_propose(self, message, from_address):
@@ -162,8 +165,7 @@ class ServerDatagramProtocol(DatagramProtocol):
     def send_done(self):
         if len(self.message_pool) > 0:
             client_message = self.message_pool.pop(0);
-            done_message = "{0} {1} {2} {3}".format(MessageType.DONE.value, 
-                client_message.client_sequence, client_message.message, self.id);
+            done_message = DoneMessage(client_message.client_sequence, client_message.message, self.id);
             self._send( str(done_message), client_message.client_id, is_client=True)
 
 def main():
@@ -197,7 +199,7 @@ def main():
     elif is_in_config:
         log_filename = config.replicas[id][2];
     else:
-        log_filename = "./logs/{0}.log".format(id);
+        log_filename = "./logs/replica_{0}.json".format(id);
 
     if not is_in_config and (host is None or port is None):
         print("Invalid id, could not found configure info");

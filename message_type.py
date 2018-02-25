@@ -2,22 +2,28 @@ from enum import Enum;
 
 class MessageType(Enum):
     CLIENT_PROPOSE = 0
-    LEADER_ACK_PROPOSE = 1
+    ACK_PROPOSE = 1
     PREPARE = 2
     PROMISE = 3
     ACCEPT = 4
     ACCEPTED = 5
     NACK = 6
     DONE = 7
+    LEADER_QUERY = 8
+    LEADER_INFO = 9
 
 class MessageClass(Enum):
     CLIENT_MESSAGE = 0
-    PREPARE_MESSAGE = 1
-    PROMISE_MESSAGE = 2
-    ACCEPT_MESSAGE = 3
-    ACCEPTED_MESSAGE = 4 
-    NACK_MESSAGE = 5
-    DONE_MESSAGE = 6
+    ACK_PROPOSE_MESSAGE = 1
+    PREPARE_MESSAGE = 2
+    PROMISE_MESSAGE = 3
+    ACCEPT_MESSAGE = 4
+    ACCEPTED_MESSAGE = 5 
+    NACK_MESSAGE = 6
+    DONE_MESSAGE = 7
+    LEADER_QUERY_MESSAGE = 8
+    LEADER_INFO_MESSAGE = 9
+
 
 class ClientMessage:
     def __init__(self, client_id, client_sequence, message):
@@ -29,6 +35,19 @@ class ClientMessage:
     def __str__(self):
         return "{0} {1} {2} {3}".format(
             self.message_type, self.client_id, self.client_sequence, self.message);
+
+class AckProposeMessage:
+    def __init__(self, sender_id, leader_id, current_slot, client_sequence, message):
+        self.sender_id = sender_id;
+        self.leader_id = leader_id;
+        self.current_slot = current_slot;
+        self.client_sequence = client_sequence
+        self.message = message
+        self.message_type = MessageType.ACK_PROPOSE.value
+    
+    def __str__(self):
+        return "{0} {1} {2} {3} {4} {5}".format(
+            self.message_type, self.sender_id, self.leader_id, self.current_slot, self.client_sequence, self.message);
 
 class PrepareMessage:
     def __init__(self, proposer_id, proposal_id, slot):
@@ -109,6 +128,28 @@ class DoneMessage:
     def __str__(self):
         return "{0} {1} {2} {3}".format(self.message_type, self.client_sequence, self.message, self.leader_id);
 
+class LeaderQueryMessage: 
+    def __init__(self, asker_id, asker_sequence, old_leader_id, is_client=False) : 
+        self.asker_id = asker_id;
+        self.asker_sequence = asker_sequence;
+        self.old_leader_id = old_leader_id;
+        self.is_client = is_client;
+        self.message_type = MessageType.LEADER_QUERY.value;
+    
+    def __str__(self):
+        return "{0} {1} {2} {3} {4}".format(self.message_type, self.asker_id, self.asker_sequence, self.old_leader_id, self.is_client);
+
+class LeaderInfoMessage: 
+    def __init__(self, sender_id, leader_id, current_slot, asker_sequence) : 
+        self.sender_id = sender_id;
+        self.leader_id = leader_id;
+        self.current_slot = current_slot;
+        self.asker_sequence = asker_sequence;
+        self.message_type = MessageType.LEADER_INFO.value;
+    
+    def __str__(self):
+        return "{0} {1} {2} {3} {4}".format(self.message_type, self.sender_id, self.leader_id, self.current_slot, self.asker_sequence);
+
 class Resolution:
     def __init__(self, id, accepted_value, slot):
         self.id = id;
@@ -122,6 +163,10 @@ def parse_str_message(message, message_class):
     if message_class == MessageClass.CLIENT_MESSAGE.value and tokens is not None and len(tokens) == 4:
         #client_id, client_sequence, message
         return ClientMessage(int(tokens[1]), int(tokens[2]), tokens[3]);
+
+    if message_class == MessageClass.ACK_PROPOSE_MESSAGE.value and tokens is not None and len(tokens) == 6:
+        #sender_id, leader_id, current_slot, client_sequence, message
+        return AckProposeMessage( int(tokens[1]), int(tokens[2]), int(tokens[3]), int(tokens[4]), tokens[5] ) ;
     
     elif message_class == MessageClass.PREPARE_MESSAGE.value and tokens is not None and len(tokens) == 5:
         return PrepareMessage( int(tokens[1]), (int(tokens[2]), int(tokens[3])), int(tokens[4]));
@@ -141,4 +186,12 @@ def parse_str_message(message, message_class):
     
     elif message_class == MessageClass.DONE_MESSAGE.value and tokens is not None and len(tokens) == 4:
         #client_sequence, message, leader_id
-        return DoneMessage( int(tokens[1]), (tokens[2]), int(tokens[3]) );
+        return DoneMessage( int(tokens[1]), tokens[2], int(tokens[3]) );
+
+    elif message_class == MessageClass.LEADER_QUERY_MESSAGE.value and tokens is not None and len(tokens) == 5:
+        #asker_id, asker_sequence, old_leader_id, is_client
+        return LeaderQueryMessage( int(tokens[1]), int(tokens[2]), int(tokens[3]), tokens[4] == "True" );
+    
+    elif message_class == MessageClass.LEADER_INFO_MESSAGE.value and tokens is not None and len(tokens) == 5:
+        #sender_id, leader_id, current_slot, asker_sequence
+        return LeaderInfoMessage( int(tokens[1]), int(tokens[2]), int(tokens[3]), int(tokens[4]) );

@@ -9,6 +9,10 @@ from utils import *;
 from twisted.internet.protocol import DatagramProtocol
 from twisted.internet import reactor;
 
+#To Do: Add timeout event at client, after a timeout, the client will broadcast LEADER_QUERY message to learn who is the current leader. Once learnt, it will re-transmit the message
+
+#To Do: include message loss, introduce p, at _send function, check a random variable, if it is less then p, do nothing.
+
 class ClientDatagramProtocol(DatagramProtocol):
     def __init__(self, id, host, port, replicas, log):
         self.id = id;
@@ -17,9 +21,12 @@ class ClientDatagramProtocol(DatagramProtocol):
         self.log = log;
         self.history = self.get_init_history();
         self.replicas = replicas;
+        self.quorum_size = int(len(self.replicas)/2)+1;
         self.leader = 0;
         self.sequence = 0;
         self.message = None;
+        self.leader_ask_sequence = 0;
+        self.leader_ask_response = {};
         
     def get_init_history(self): 
         return {"sent":{},"accepted":{}, "last_sequence": 0, "last_leader": 0}
@@ -89,10 +96,11 @@ class ClientDatagramProtocol(DatagramProtocol):
         if len(self.history["sent"]):
             first_failed_sent = list(self.history["sent"].items())[0];
             client_message = self.generate_client_message(message = first_failed_sent[1], sequence = int(first_failed_sent[0]));
-            self.send_client_message(client_message, self.leader)
+            self.send_client_message(client_message, self.leader);
         else:
             client_message = self.generate_client_message();
             self.send_client_message(client_message, self.leader)
+        # self.broadcast_leader_query_message();
     
     def datagramReceived(self, data, from_address):
         print("Client received %r from %s:%d" % (data.decode(), from_address[0], from_address[1]));
@@ -100,30 +108,66 @@ class ClientDatagramProtocol(DatagramProtocol):
             message_tokens = data.decode().split(' ');
             message_type = int(message_tokens[0]);
 
+            if message_type == MessageType.ACK_PROPOSE.value:
+                self.receive_ack_propose(data.decode(), from_address);
+
             if message_type == MessageType.DONE.value:
                 self.receive_done(data.decode(), from_address);
+
+            if message_type == MessageType.LEADER_INFO.value:
+                self.receive_leader_info(data.decode(), from_address);
                 
     def _send(self, message, to_id):
         to_address = (self.replicas[to_id][0], self.replicas[to_id][1]);
         self.transport.write( message.encode(), to_address);
+    
+    def broadcast_leader_query_message(self):
+        self.leader_ask_sequence += 1;
+        self.leader_ask_response = {};
+        leader_query_message = LeaderQueryMessage(self.id, self.leader_ask_sequence, self.leader, True);
+        for replica_id in self.replicas:
+            self._send(str(leader_query_message), replica_id);
+
+    def receive_leader_info(self, message, from_address):
+        leader_info = parse_str_message(message, MessageClass.LEADER_INFO_MESSAGE.value);
+        if leader_info.asker_sequence < self.leader_ask_sequence:
+            return;
+        
+        if int(leader_info.leader_id) not in self.leader_ask_response:
+            self.leader_ask_response[int(leader_info.leader_id)] = 1;
+        else:
+            self.leader_ask_response[int(leader_info.leader_id)] += 1;
+
+        if self.leader_ask_response[int(leader_info.leader_id)] == self.quorum_size: 
+            self.leader = int(leader_info.leader_id);
+            self.leader_ask_sequence += 1;
+            self.leader_ask_response = {};
+        return;
 
     def send_client_message(self, client_message, replica_id):
         self._send(str(client_message), replica_id);
         self.update_history("sent", client_message.client_sequence, client_message.message);
-    
-    def broadcast_client_message(self, message_type):
-        if message_type == MessageType.CLIENT_PROPOSE.value:
-            client_message = self.generate_client_message();
+
+    # def broadcast_client_message(self):
+    #     client_message = self.generate_client_message();
         
-        for replica_id in self.replicas:
-            self.send_client_message(client_message, replica_id);
+    #     for replica_id in self.replicas:
+    #         self.send_client_message(client_message, replica_id);
+
+    def receive_ack_propose(self, message, from_address):
+        ack_propose = parse_str_message(message, MessageClass.ACK_PROPOSE_MESSAGE.value);
+        if ack_propose.client_sequence >= self.sequence and ack_propose.sender_id != ack_propose.leader_id:
+            self.leader = int(ack_propose.leader_id);
+            client_message = self.generate_client_message(self.message, self.sequence);
+            self.send_client_message(client_message, self.leader);
 
     def receive_done(self, message, from_address):
         done_message = parse_str_message(message, MessageClass.DONE_MESSAGE.value);
         self.update_history("accepted", done_message.client_sequence, done_message.message);
 
         if self.sequence < 5 :
-            self.broadcast_client_message(MessageType.CLIENT_PROPOSE.value);
+            client_message = self.generate_client_message();
+            self.send_client_message(client_message, self.leader);
 
 
 def main():

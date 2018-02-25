@@ -13,6 +13,7 @@ class ServerDatagramProtocol(DatagramProtocol):
         self.port = port;
         self.log = log;
         self.replicas = replicas;
+        self.leader = 0;
         self.paxos = PaxosInstance(self.id, int(len(self.replicas)/2)+1, is_leader=(self.id ==0));
         self.slot = 0;
         self.message_pool = []; #(ClientMessage)
@@ -43,6 +44,9 @@ class ServerDatagramProtocol(DatagramProtocol):
 
             elif message_type == MessageType.NACK.value:
                 self.receive_nack(data.decode(), from_address);
+            
+            elif message_type == MessageType.LEADER_QUERY.value:
+                self.receive_leader_query(data.decode(), from_address);
 
     def save_state(self):
         #TO DO: save state to the log file 
@@ -65,12 +69,14 @@ class ServerDatagramProtocol(DatagramProtocol):
         self.transport.write(message.encode(), (host,port) );
     
     def receive_propose(self, message, from_address):
-        if self.paxos.leader:
-            #<message_type, client_id, sequence, message, replica_id>
-            client_message = parse_str_message(message, MessageClass.CLIENT_MESSAGE.value);
+        
+        #<message_type, client_id, sequence, message, replica_id>
+        client_message = parse_str_message(message, MessageClass.CLIENT_MESSAGE.value);
+        self.send_ack_propose(client_message);    
+        
+        if self.leader == self.id:
             self.message_pool.append(client_message)
             print("replica #%d received propose message %r from %s:%d" % (self.id, message, from_address[0], from_address[1]));
-            #self.transport.write("{0} {1}".format( MessageType.LEADER_ACK_PROPOSE.value, message_tokens[1]).encode(), (self.host, self.port));
             
             if self.paxos.proposed_value is None:
                 self.paxos.propose_value(client_message.message, self.slot);
@@ -78,6 +84,10 @@ class ServerDatagramProtocol(DatagramProtocol):
             prepare_message = PrepareMessage(replica_id, proposal_id, self.slot); 
             self.send_prepare(prepare_message);
 
+    def send_ack_propose(self, client_message):
+        ack_propose_message = AckProposeMessage(self.id, self.leader, self.slot, client_message.client_sequence, client_message.message);
+        self._send(str(ack_propose_message), client_message.client_id, is_client=True);
+            
     def send_prepare(self, prepare_message):
         for replica_id in self.replicas:
             self._send(str(prepare_message), replica_id);
@@ -167,6 +177,15 @@ class ServerDatagramProtocol(DatagramProtocol):
             client_message = self.message_pool.pop(0);
             done_message = DoneMessage(client_message.client_sequence, client_message.message, self.id);
             self._send( str(done_message), client_message.client_id, is_client=True)
+    
+    def receive_leader_query(self, message, from_address):
+        leader_query = parse_str_message(message, MessageClass.LEADER_QUERY_MESSAGE.value);
+        self.send_leader_info(leader_query.asker_id, leader_query.asker_sequence, leader_query.is_client);
+    
+    def send_leader_info(self, asker_id, asker_sequence, is_client = False):
+        leader_info = LeaderInfoMessage(self.id, self.leader, self.slot, asker_sequence);
+        self._send(str(leader_info), asker_id, is_client);
+        
 
 def main():
     argv = process_argv(sys.argv);

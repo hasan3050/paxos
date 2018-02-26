@@ -1,4 +1,5 @@
 import sys;
+import random;
 import os;
 import json;
 import config;
@@ -196,11 +197,13 @@ class ServerDatagramProtocol(DatagramProtocol):
                 self.receive_heart_beat(data.decode(), from_address);
 
     def _send(self, message, to_id, is_client=False):
-        if is_client == False:
-            (host,port) = (self.replicas[to_id][0],self.replicas[to_id][1]) 
-        if is_client == True:
-            (host, port) = (config.clients[to_id][0],config.clients[to_id][1])
-        self.transport.write(message.encode(), (host,port) );
+        random_number = random.random();
+        if self.p < random_number:
+            if is_client == False:
+                (host,port) = (self.replicas[to_id][0],self.replicas[to_id][1]) 
+            if is_client == True:
+                (host, port) = (config.clients[to_id][0],config.clients[to_id][1])
+            self.transport.write(message.encode(), (host,port) );
 
     def receive_heart_beat(self, message, from_address):
         heart_beat = parse_str_message(message, MessageClass.HEART_BEAT_MESSAGE.value);

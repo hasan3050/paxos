@@ -52,7 +52,7 @@ class Proposer ():
     def receive_promise(self, message):
         self.observe_proposal( message.proposal_id )
 
-        if not self.leader and message.proposal_id == self.proposal_id and message.acceptor_id not in self.promises_received:
+        if message.proposal_id == self.proposal_id and message.acceptor_id not in self.promises_received:
             #print("going to add to the promises list")
             self.promises_received.add( message.acceptor_id )
 
@@ -61,6 +61,7 @@ class Proposer ():
                 if message.last_accepted_value is not None:
                     self.proposed_value = message.last_accepted_value
 
+            #print(len(self.promises_received), self.quorum_size)
             if len(self.promises_received) == self.quorum_size:
                 self.leader = True
 

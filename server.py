@@ -88,7 +88,7 @@ class ServerDatagramProtocol(DatagramProtocol):
         self.remove_from_message_pool(prev_slot);
         self.slot = prev_slot + 1;
         _is_leader = self.paxos.leader; #(self.leader_is_alive is True and self.leader == self.id)
-        self.paxos = PaxosInstance(self.id, int(len(self.replicas)/2)+1, is_leader= _is_leader);
+        self.paxos = PaxosInstance(self.id, self.quorum_size, is_leader= _is_leader);
         if _is_leader:
             self.send_done(client_message);
             self.propose_next_message();
@@ -145,8 +145,13 @@ class ServerDatagramProtocol(DatagramProtocol):
         if str(client_message.client_id) in self.history["accepted"]:
             if str(client_message.client_sequence) in self.history["accepted"][str(client_message.client_id)]:
                 return False;
-        
         return True;
+    
+    def is_message_in_pool(self, client_message):
+        for slot in self.message_pool:
+            wait_message = self.message_pool[slot][0];
+            if wait_message.client_id == client_message.client_id and wait_message.client_sequence == client_message.client_sequence:
+                return True
 
     def start_heart_beat(self):
         if self.heart_beat_watch is None:
@@ -209,7 +214,7 @@ class ServerDatagramProtocol(DatagramProtocol):
     def receive_heart_beat(self, message, from_address):
         heart_beat = parse_str_message(message, MessageClass.HEART_BEAT_MESSAGE.value);
         print("Replica #{0} received heart beat of Replica #{1}. leader {2} is {3} next leader {4}".format(
-            self.id, heart_beat.id, heart_beat.leader, heart_beat.leader_is_alive, heart_beat.next_leader))
+           self.id, heart_beat.id, heart_beat.leader, heart_beat.leader_is_alive, heart_beat.next_leader))
         heart_beat.received_heart_beat = self.heart_beat;
         self.replica_status["heart_beat"][heart_beat.id] = heart_beat;
     
@@ -303,9 +308,11 @@ class ServerDatagramProtocol(DatagramProtocol):
         client_message = parse_str_message(message, MessageClass.CLIENT_MESSAGE.value);
         self.send_ack_propose(client_message);    
         
-        print(self.id, self.leader, self.paxos.leader)
+        #print(self.id, self.leader, self.paxos.leader)
         if self.paxos.leader:
             if self.check_new_client_message(client_message):
+                if self.is_message_in_pool(client_message) is True:
+                    return;
                 self.add_to_message_pool(client_message);
                 print("replica #%d received propose message %r from %s:%d" % (self.id, message, from_address[0], from_address[1]));
                 #To do: seperate this from here, poll when the message_pool is ready
@@ -369,7 +376,6 @@ class ServerDatagramProtocol(DatagramProtocol):
         
         # if promise_message.slot != self.slot:
         #     return
-
         m = self.paxos.receive_promise(promise_message)
         
         if isinstance(m, AcceptMessage):
@@ -384,12 +390,12 @@ class ServerDatagramProtocol(DatagramProtocol):
         return
 
     def send_accept(self, accept_message):
-        #print("replica #%d sent accept message %s" % (self.id, str(accept_message)));
+        print("replica #%d sent accept message %s" % (self.id, str(accept_message)));
         for replica_id in self.replicas:
             self._send( str(accept_message), replica_id);
     
     def receive_accept(self, message, from_address):
-        #print("replica #%d received accept message %r" % (self.id, message));
+        print("replica #%d received accept message %r" % (self.id, message));
 
         accept_message = parse_str_message(message, MessageClass.ACCEPT_MESSAGE.value);
         

@@ -155,6 +155,7 @@ class ClientDatagramProtocol(DatagramProtocol):
         return;
 
     def send_client_message(self, client_message, replica_id):
+        #print("current leader is {0}".format(self.leader));
         self.stop_client_message_watch();
         self._send(str(client_message), replica_id);
         self.update_history("sent", client_message.client_sequence, client_message.message);
@@ -200,6 +201,7 @@ class ClientDatagramProtocol(DatagramProtocol):
     #         self.send_client_message(client_message, replica_id);
 
     def receive_ack_propose(self, message, from_address):
+        #print("Client #{0} got ack for propose for {1} from {2}".format(self.id, message, from_address[1]))
         ack_propose = parse_str_message(message, MessageClass.ACK_PROPOSE_MESSAGE.value);
         if ack_propose.client_sequence >= self.sequence and ack_propose.sender_id != ack_propose.leader_id:
             self.leader = int(ack_propose.leader_id);

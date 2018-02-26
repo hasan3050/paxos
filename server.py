@@ -6,33 +6,44 @@ from message_type import MessageType;
 from utils import *;
 from paxos_instance import *;
 from twisted.internet.protocol import DatagramProtocol
-from twisted.internet import reactor;
+from twisted.internet import reactor, task;
 
 #To Do: verify whether the message.slot != self.slot can cause trouble
+#To Do: when a new leader is updated, change it's paxos value
 
 class MessagePoolState(Enum):
     NEW = 0
     PROPOSED = 1
 
 class ServerDatagramProtocol(DatagramProtocol):
-    def __init__(self, id, host, port, log, replicas):
+    def __init__(self, id, host, port, log, replicas, p=0, timeout=0.5, f=1):
         self.id = id;
         self.host = host;
         self.port = port;
         self.log = log;
         self.replicas = replicas;
+        self.quorum_size = 2*f + 1;#int(len(self.replicas)/2)+1;
         self.history = self.get_init_history();
         self.heart_beat = 0;
         self.leader = 0;
-        self.paxos = PaxosInstance(self.id, int(len(self.replicas)/2)+1, is_leader=(self.id == self.leader));
+        self.leader_is_alive = (self.id == self.leader);
+        self.paxos = PaxosInstance(self.id, self.quorum_size, is_leader=(self.id == self.leader));
         self.slot = 0;
         self.first_unchosen_slot = 0;
         self.message_pool = {}; #{slot : (client_message, new/sent)}
+        self.p = 0;
+        self.propose_timeout = timeout;
+        self.heart_beat_interval = 1; #1 sec
+        self.print_log_interval = 5; #5 sec
+        self.max_heart_beat_miss = 2;
+        self.heart_beat_watch = None;
+        self.print_log_watch = None;
+        self.replica_status = {"heart_beat": {}, "active": []};
 
     def get_init_history(self): 
         return {
-            "accepted":{}, #{client_id : {client_sequence: (message, slot)}}
             "states": {}, # {slot:value}
+            "accepted":{}, #{client_id : {client_sequence: (message, slot)}}
             "last_leader": 0, 
             "highest_proposal_id": None, #(highest_proposal_id_no, replica_id) 
             "last_promised_id" : None, #(highest_proposal_id_no, replica_id)
@@ -59,38 +70,9 @@ class ServerDatagramProtocol(DatagramProtocol):
             except Exception:
                 print("Failed to read log file. Initiating from the beginning");
                 self.history = self.get_init_history();
-
-    def startProtocol(self):
-        print("Server #%d initiated at %s %d" % (self.id, self.host,self.port));
-        self.load_state();
-        #print(self.id, self.slot, self.first_unchosen_slot, self.leader);
+        self.start_heart_beat();
+        self.start_print_log();
     
-    def datagramReceived(self, data, from_address):
-        if data.decode() is not None:
-            message_tokens = data.decode().split(' ');
-            message_type = int(message_tokens[0]);
-            
-            if message_type == MessageType.CLIENT_PROPOSE.value:
-                self.receive_propose(data.decode(), from_address)
-            
-            elif message_type == MessageType.PREPARE.value:
-                self.receive_prepare(data.decode(), from_address);
-            
-            elif message_type == MessageType.PROMISE.value:
-                self.receive_promise(data.decode(), from_address);
-
-            elif message_type == MessageType.ACCEPT.value:
-                self.receive_accept(data.decode(), from_address);
-
-            elif message_type == MessageType.ACCEPTED.value:
-                self.receive_accepted(data.decode(), from_address);
-
-            elif message_type == MessageType.NACK.value:
-                self.receive_nack(data.decode(), from_address);
-            
-            elif message_type == MessageType.LEADER_QUERY.value:
-                self.receive_leader_query(data.decode(), from_address);
-
     def save_state(self):
         self.has_log_file();
         
@@ -104,7 +86,7 @@ class ServerDatagramProtocol(DatagramProtocol):
         self.add_to_history_accepted(client_message, prev_slot);
         self.remove_from_message_pool(prev_slot);
         self.slot = prev_slot + 1;
-        _is_leader = self.paxos.leader;
+        _is_leader = (self.leader_is_alive is True and self.leader == self.id)#self.paxos.leader;
         self.paxos = PaxosInstance(self.id, int(len(self.replicas)/2)+1, is_leader= _is_leader);
         if _is_leader:
             self.send_done(client_message);
@@ -165,15 +147,145 @@ class ServerDatagramProtocol(DatagramProtocol):
         
         return True;
 
+    def start_heart_beat(self):
+        if self.heart_beat_watch is None:
+            self.heart_beat_watch = task.LoopingCall(self.send_heart_beat);
+            self.heart_beat_watch.start(self.heart_beat_interval);
+    
+    def start_print_log(self):
+        if self.print_log_watch is None:
+            self.print_log_watch = task.LoopingCall(self.print_log);
+            self.print_log_watch.start(self.print_log_interval);
+    
+    def print_log(self):
+        values = list(self.history["states"].values());
+        print("".join(values));
+
+    def startProtocol(self):
+        print("Server #%d initiated at %s %d" % (self.id, self.host,self.port));
+        self.load_state();
+        #print(self.id, self.slot, self.first_unchosen_slot, self.leader);
+    
+    def datagramReceived(self, data, from_address):
+        if data.decode() is not None:
+            message_tokens = data.decode().split(' ');
+            message_type = int(message_tokens[0]);
+            
+            if message_type == MessageType.CLIENT_PROPOSE.value:
+                self.receive_propose(data.decode(), from_address)
+            
+            elif message_type == MessageType.PREPARE.value:
+                self.receive_prepare(data.decode(), from_address);
+            
+            elif message_type == MessageType.PROMISE.value:
+                self.receive_promise(data.decode(), from_address);
+
+            elif message_type == MessageType.ACCEPT.value:
+                self.receive_accept(data.decode(), from_address);
+
+            elif message_type == MessageType.ACCEPTED.value:
+                self.receive_accepted(data.decode(), from_address);
+
+            elif message_type == MessageType.NACK.value:
+                self.receive_nack(data.decode(), from_address);
+            
+            elif message_type == MessageType.LEADER_QUERY.value:
+                self.receive_leader_query(data.decode(), from_address);
+            
+            elif message_type == MessageType.HEART_BEAT.value:
+                self.receive_heart_beat(data.decode(), from_address);
+
     def _send(self, message, to_id, is_client=False):
         if is_client == False:
             (host,port) = (self.replicas[to_id][0],self.replicas[to_id][1]) 
         if is_client == True:
             (host, port) = (config.clients[to_id][0],config.clients[to_id][1])
         self.transport.write(message.encode(), (host,port) );
+
+    def receive_heart_beat(self, message, from_address):
+        heart_beat = parse_str_message(message, MessageClass.HEART_BEAT_MESSAGE.value);
+        print("Replica #{0} received heart beat of Replica #{1}. leader {2} is {3} next leader {4}".format(
+            self.id, heart_beat.id, heart_beat.leader, heart_beat.leader_is_alive, heart_beat.next_leader))
+        heart_beat.received_heart_beat = self.heart_beat;
+        self.replica_status["heart_beat"][heart_beat.id] = heart_beat;
+    
+    def send_heart_beat(self):
+        self.set_active_replicas();
+        heart_beat = HeartBeatMessage(
+            self.id, self.heart_beat, self.leader, self.leader_is_alive, self.get_next_leader(), 
+            self.slot, self.first_unchosen_slot, self.paxos.highest_proposal_id[0]);
+        
+        for replica_id in self.replicas:
+            self._send(str(heart_beat), replica_id);
+        self.heart_beat += 1;
+
+    def set_active_replicas(self):
+        self.replica_status["active"] = [];
+        for id in self.replica_status["heart_beat"] :
+            message = self.replica_status["heart_beat"][id];            
+            delay = self.heart_beat - message.received_heart_beat;         
+            if delay <= self.max_heart_beat_miss :
+                self.replica_status["active"].append(id);
+                if id == self.leader:
+                    self.leader_is_alive = True;
+            elif id == self.leader:
+                self.leader_is_alive = False;
+
+        current_active_leader = self.get_current_active_leader();
+        if current_active_leader != -1:
+            self.leader = current_active_leader;
+            self.leader_is_alive = (current_active_leader in self.replica_status["active"]);
+        else:
+            next_probable_leader = self.get_next_leader();
+            if self.go_for_leader(next_probable_leader) is True:
+                self.leader = next_probable_leader;
+                self.leader_is_alive = True;
+    
+    def go_for_leader(self, leader):
+        next_probable_leader = leader;
+        leader_consensus = {};
+        if next_probable_leader == -1:
+            return False;
+
+        for id in self.replica_status["heart_beat"] :
+            message = self.replica_status["heart_beat"][id];
+            if (message.leader_is_alive is False and message.next_leader == next_probable_leader) or (message.leader_is_alive is True and message.leader == next_probable_leader): 
+                if next_probable_leader not in leader_consensus:
+                    leader_consensus[next_probable_leader] = 1;
+                else:
+                    leader_consensus[next_probable_leader] += 1;
+                if leader_consensus[next_probable_leader] >= self.quorum_size:
+                    return True;
+        return False;
+
+    def get_current_active_leader(self):        
+        leader_consensus = {};
+        for id in self.replica_status["heart_beat"] :
+            message = self.replica_status["heart_beat"][id];
+            if message.leader != -1 and message.leader_is_alive is True: 
+                if message.leader not in leader_consensus:
+                    leader_consensus[message.leader] = 1;
+                else:
+                    leader_consensus[message.leader] += 1;
+                if leader_consensus[message.leader] >= self.quorum_size:
+                    return message.leader;
+        return -1;
+    
+    def get_next_leader(self):
+        if self.leader == -1:
+            return -1;
+        count = 0;
+        total_replica = len(self.replicas);
+        active_ids = list(set(self.replica_status["active"]));
+        
+        for i in range(1, total_replica):
+            probable_replica = (self.leader + i) % total_replica; 
+            if probable_replica in active_ids:
+                return probable_replica;
+        
+        return -1;
     
     def receive_propose(self, message, from_address):
-        
         #<message_type, client_id, sequence, message, replica_id>
         client_message = parse_str_message(message, MessageClass.CLIENT_MESSAGE.value);
         self.send_ack_propose(client_message);    
@@ -321,13 +433,19 @@ def main():
     id = 0;
     log_filename = None;
     is_in_config = False;
+    p = 0;
+    f = 1;
+    timeout = 0.5;
 
     if "id" in argv and argv["id"].isdigit():
         if int(argv["id"]) in config.replicas:
             id = int(argv["id"]);
             is_in_config = True;
     else:
-        print("Usage: python3 ./server.py --id <integer> --host <ip address, optional> --port <integer, optional> --log <string, optional>");
+        print("Usage: python3 ./server.py --id <integer, required> " +\
+            "--host <ip address, optional> --port <integer, optional> "+\
+            "--log <string, optional> --p <float, optional> --timeout <float, optional> " +\
+            "--f <integer, optional>");
         return -1;
     
     if "host" in argv and is_valid_ip(argv["host"]):
@@ -347,11 +465,26 @@ def main():
     else:
         log_filename = "./logs/replica_{0}.json".format(id);
 
+    if "p" in argv and is_number(argv["p"]):
+        p = float(argv["p"]);
+    elif is_in_config:
+        p = float(config.replicas[id][3]);
+
+    if "f" in argv and is_number(argv["f"]):
+        f = int(argv["f"]);
+    elif is_in_config:
+        f = int(config.f);
+
+    if "timeout" in argv and is_number(argv["timeout"]):
+        timeout = float(argv["timeout"]);
+    elif is_in_config:
+        timeout = float(config.replicas[id][4]);
+
     if not is_in_config and (host is None or port is None):
         print("Invalid id, could not found configure info");
         return -1;
     
-    reactor.listenUDP(port, ServerDatagramProtocol(id, host, port, log_filename, config.replicas));
+    reactor.listenUDP(port, ServerDatagramProtocol(id, host, port, log_filename, config.replicas, p, timeout, f));
 
 reactor.callWhenRunning(main)
 reactor.run();

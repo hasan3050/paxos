@@ -11,6 +11,7 @@ class MessageType(Enum):
     DONE = 7
     LEADER_QUERY = 8
     LEADER_INFO = 9
+    HEART_BEAT = 10
 
 class MessageClass(Enum):
     CLIENT_MESSAGE = 0
@@ -23,7 +24,7 @@ class MessageClass(Enum):
     DONE_MESSAGE = 7
     LEADER_QUERY_MESSAGE = 8
     LEADER_INFO_MESSAGE = 9
-
+    HEART_BEAT_MESSAGE = 10
 
 class ClientMessage:
     def __init__(self, client_id, client_sequence, message):
@@ -150,6 +151,25 @@ class LeaderInfoMessage:
     def __str__(self):
         return "{0} {1} {2} {3} {4}".format(self.message_type, self.sender_id, self.leader_id, self.current_slot, self.asker_sequence);
 
+class HeartBeatMessage: 
+    def __init__(self, id, heart_beat, leader, leader_is_alive, next_leader, slot, first_unchosen_slot, round) : 
+        self.id = id;
+        self.heart_beat = heart_beat;
+        self.leader = leader;
+        self.leader_is_alive = leader_is_alive;
+        self.next_leader = next_leader;
+        self.slot = slot;
+        self.first_unchosen_slot = first_unchosen_slot;
+        self.round = round;
+        self.received_heart_beat = None;
+        self.message_type = MessageType.HEART_BEAT.value;
+    
+    def __str__(self):
+        return "{0} {1} {2} {3} {4} {5} {6} {7} {8}".format(
+            self.message_type, self.id, self.heart_beat, 
+            self.leader, self.leader_is_alive, self.next_leader,
+            self.slot, self.first_unchosen_slot ,self.round);
+
 class Resolution:
     def __init__(self, id, accepted_value, slot):
         self.id = id;
@@ -195,3 +215,7 @@ def parse_str_message(message, message_class):
     elif message_class == MessageClass.LEADER_INFO_MESSAGE.value and tokens is not None and len(tokens) == 5:
         #sender_id, leader_id, current_slot, asker_sequence
         return LeaderInfoMessage( int(tokens[1]), int(tokens[2]), int(tokens[3]), int(tokens[4]) );
+
+    elif message_class == MessageClass.HEART_BEAT_MESSAGE.value and tokens is not None and len(tokens) == 9:
+        #id, heart_beat, leader, leader_is_alive, next_leader, slot, first_unchosen_slot, round
+        return HeartBeatMessage( int(tokens[1]), int(tokens[2]), int(tokens[3]), tokens[4] == "True", int(tokens[5]), int(tokens[6]), int(tokens[7]), int(tokens[8]) );

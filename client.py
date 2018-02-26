@@ -10,14 +10,14 @@ from twisted.internet.protocol import DatagramProtocol
 from twisted.internet import reactor, task;
 
 class ClientDatagramProtocol(DatagramProtocol):
-    def __init__(self, id, host, port, replicas, log, p = 0, timeout = 0.5):
+    def __init__(self, id, host, port, replicas, log, p = 0, timeout = 0.5, f=1):
         self.id = id;
         self.host = host;
         self.port = port;
         self.log = log;
         self.history = self.get_init_history();
         self.replicas = replicas;
-        self.quorum_size = int(len(self.replicas)/2)+1;
+        self.quorum_size = 2*f+1;#int(len(self.replicas)/2)+1;
         self.leader = 0;
         self.sequence = 0;
         self.message = None;
@@ -112,7 +112,7 @@ class ClientDatagramProtocol(DatagramProtocol):
 
             if message_type == MessageType.DONE.value:
                 self.receive_done(data.decode(), from_address);
-                print("Client received done message %r from %s:%d" % (data.decode(), from_address[0], from_address[1]));
+                print("Client #%d has received done message %r from %s:%d" % ( self.id, data.decode(), from_address[0], from_address[1]));
 
             if message_type == MessageType.LEADER_INFO.value:
                 self.receive_leader_info(data.decode(), from_address);
@@ -223,6 +223,7 @@ def main():
     log_filename = '';
     is_in_config = False;
     p = 0;
+    f = 1;
     timeout = 0.5;
 
     if "id" in argv and argv["id"].isdigit():
@@ -260,11 +261,16 @@ def main():
     else:
         log = "./logs/client_{0}.json".format(id);
 
+    if "f" in argv and is_number(argv["f"]):
+        f = int(argv["f"]);
+    elif is_in_config:
+        f = int(config.f);
+
     if not is_in_config and (host is None or port is None):
         print("Invalid id, could not found configure info");
         return -1;
 
-    reactor.listenUDP(port, ClientDatagramProtocol(id, host, port, config.replicas, log, p, timeout));
+    reactor.listenUDP(port, ClientDatagramProtocol(id, host, port, config.replicas, log, p, timeout, f));
 
 reactor.callWhenRunning(main)
 reactor.run();

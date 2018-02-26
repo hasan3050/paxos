@@ -210,9 +210,9 @@ class ClientDatagramProtocol(DatagramProtocol):
         done_message = parse_str_message(message, MessageClass.DONE_MESSAGE.value);
         self.update_history("accepted", done_message.client_sequence, done_message.message);
 
-        if self.sequence < 5 :
-            client_message = self.generate_client_message();
-            self.send_client_message(client_message, self.leader);
+        #if self.sequence < 5 :
+        client_message = self.generate_client_message();
+        self.send_client_message(client_message, self.leader);
 
 
 def main():

@@ -28,7 +28,7 @@ class ServerDatagramProtocol(DatagramProtocol):
         self.heart_beat = 0;
         self.leader = 0;
         self.leader_is_alive = (self.id == self.leader);
-        self.paxos = PaxosInstance(self.id, self.quorum_size, is_leader=(self.id == self.leader));
+        self.paxos = PaxosInstance(self.id, self.quorum_size, is_leader=False);
         self.slot = 0;
         self.first_unchosen_slot = 0;
         self.message_pool = {}; #{slot : (client_message, new/sent)}
@@ -87,7 +87,7 @@ class ServerDatagramProtocol(DatagramProtocol):
         self.add_to_history_accepted(client_message, prev_slot);
         self.remove_from_message_pool(prev_slot);
         self.slot = prev_slot + 1;
-        _is_leader = (self.leader_is_alive is True and self.leader == self.id)#self.paxos.leader;
+        _is_leader = self.paxos.leader; #(self.leader_is_alive is True and self.leader == self.id)
         self.paxos = PaxosInstance(self.id, int(len(self.replicas)/2)+1, is_leader= _is_leader);
         if _is_leader:
             self.send_done(client_message);
@@ -160,6 +160,7 @@ class ServerDatagramProtocol(DatagramProtocol):
     
     def print_log(self):
         values = list(self.history["states"].values());
+        print("*************log of replica #{0}*************".format(self.id));
         print("".join(values));
 
     def startProtocol(self):
@@ -236,11 +237,13 @@ class ServerDatagramProtocol(DatagramProtocol):
 
         current_active_leader = self.get_current_active_leader();
         if current_active_leader != -1:
+            self.update_paxos(current_active_leader, self.leader);
             self.leader = current_active_leader;
             self.leader_is_alive = (current_active_leader in self.replica_status["active"]);
         else:
             next_probable_leader = self.get_next_leader();
             if self.go_for_leader(next_probable_leader) is True:
+                self.update_paxos(next_probable_leader, self.leader);
                 self.leader = next_probable_leader;
                 self.leader_is_alive = True;
     
@@ -287,12 +290,20 @@ class ServerDatagramProtocol(DatagramProtocol):
                 return probable_replica;
         
         return -1;
+
+    def update_paxos(self, new_leader, old_leader):
+        if old_leader == self.id:
+            if new_leader != self.id:
+                self.paxos.leader = False;
+        if new_leader == self.id:
+            self.paxos.leader = True;
     
     def receive_propose(self, message, from_address):
         #<message_type, client_id, sequence, message, replica_id>
         client_message = parse_str_message(message, MessageClass.CLIENT_MESSAGE.value);
         self.send_ack_propose(client_message);    
         
+        print(self.id, self.leader, self.paxos.leader)
         if self.paxos.leader:
             if self.check_new_client_message(client_message):
                 self.add_to_message_pool(client_message);

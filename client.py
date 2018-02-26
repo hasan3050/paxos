@@ -119,6 +119,7 @@ class ClientDatagramProtocol(DatagramProtocol):
                 
     def _send(self, message, to_id):
         to_address = (self.replicas[to_id][0], self.replicas[to_id][1]);
+        #print("sending this message {0} to {1}:{2}".format(message, to_address[0], to_address[1]))
         self.transport.write( message.encode(), to_address);
     
     def broadcast_leader_query_message(self):

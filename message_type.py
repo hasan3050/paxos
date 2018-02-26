@@ -80,28 +80,28 @@ class AcceptMessage:
     def __init__(self, proposer_id, proposal_id, proposal_value, slot):
         self.proposer_id = proposer_id; #replica_id
         self.proposal_id = proposal_id; #<highest_proposal_id_no, replica_id>
-        self.proposal_value = proposal_value;
+        self.proposal_value = proposal_value; #<client_id, client_sequence, message>
         self.slot = slot;
         self.message_type = MessageType.ACCEPT.value;
 
     def __str__(self):
-        return "{0} {1} {2} {3} {4} {5}".format(
-            self.message_type, self.proposer_id, self.proposal_id[0], self.proposal_id[1], self.proposal_value, self.slot);
+        return "{0} {1} {2} {3} {4} {5} {6} {7}".format(
+            self.message_type, self.proposer_id, self.proposal_id[0], self.proposal_id[1], self.proposal_value[0], self.proposal_value[1], self.proposal_value[2], self.slot);
 
 class AcceptedMessage:
     def __init__(self, acceptor_id, proposal_id, accepted_value, proposer_id, slot):
         self.acceptor_id = acceptor_id; #replica_id
         self.proposal_id = proposal_id; #<highest_proposal_id_no, replica_id>
-        self.accepted_value = accepted_value;
+        self.accepted_value = accepted_value; #<client_id, client_sequence, message>
         self.proposer_id = proposer_id; #replica_id
-        
         self.slot = slot;
         self.message_type = MessageType.ACCEPTED.value;
 
     def __str__(self):
-        return "{0} {1} {2} {3} {4} {5} {6}".format(
+        return "{0} {1} {2} {3} {4} {5} {6} {7} {8}".format(
             self.message_type, self.acceptor_id, 
-            self.proposal_id[0], self.proposal_id[1], self.accepted_value, 
+            self.proposal_id[0], self.proposal_id[1], 
+            self.accepted_value[0], self.accepted_value[1], self.accepted_value[2],
             self.proposer_id, self.slot);
 
 class NackMessage:
@@ -153,7 +153,7 @@ class LeaderInfoMessage:
 class Resolution:
     def __init__(self, id, accepted_value, slot):
         self.id = id;
-        self.accepted_value = accepted_value;
+        self.accepted_value = accepted_value; #<client_id, client_sequence, message>
         self.slot = slot;
 
 def parse_str_message(message, message_class):
@@ -176,13 +176,13 @@ def parse_str_message(message, message_class):
         last_accepted_id = None if (tokens[4] == 'None' and tokens[5] == 'None') else (int(tokens[4]), int(tokens[5]))
         return PromiseMessage( int(tokens[1]), (int(tokens[2]), int(tokens[3])), last_accepted_id, tokens[6], int(tokens[7]), int(tokens[8]));
 
-    elif message_class == MessageClass.ACCEPT_MESSAGE.value and tokens is not None and len(tokens) == 6:
+    elif message_class == MessageClass.ACCEPT_MESSAGE.value and tokens is not None and len(tokens) == 8:
         #leader_id, proposal_id, proposed_value, slot
-        return AcceptMessage( int(tokens[1]), (int(tokens[2]), int(tokens[3])), tokens[4], int(tokens[5]));
+        return AcceptMessage( int(tokens[1]), (int(tokens[2]), int(tokens[3])), (int(tokens[4]), int(tokens[5]), tokens[6]), int(tokens[7]));
     
-    elif message_class == MessageClass.ACCEPTED_MESSAGE.value and tokens is not None and len(tokens) == 7:
+    elif message_class == MessageClass.ACCEPTED_MESSAGE.value and tokens is not None and len(tokens) == 9:
         #acceptor_id, proposal_id, accepted_value, proposer_id, slot
-        return AcceptedMessage( int(tokens[1]), (int(tokens[2]), int(tokens[3])), tokens[4], int(tokens[5]), int(tokens[6]));
+        return AcceptedMessage( int(tokens[1]), (int(tokens[2]), int(tokens[3])), (int(tokens[4]), int(tokens[5]), tokens[6]), int(tokens[7]), int(tokens[8]));
     
     elif message_class == MessageClass.DONE_MESSAGE.value and tokens is not None and len(tokens) == 4:
         #client_sequence, message, leader_id

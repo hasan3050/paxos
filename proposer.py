@@ -2,7 +2,7 @@ from message_type import *;
 
 class Proposer ():
     leader               = False
-    proposed_value       = None 
+    proposed_value       = None # <client_id, client_sequence, message>
     proposal_id          = None # <highest_proposal_id_no, id>
     highest_accepted_id  = None
     promises_received    = None #set
@@ -27,9 +27,9 @@ class Proposer ():
 
         return self.current_prepare_msg
 
-    def propose_value(self, value, slot):
+    def propose_value(self, client_message, slot):
         if self.proposed_value is None:
-            self.proposed_value = value
+            self.proposed_value = (client_message.client_id, client_message.client_sequence, client_message.message)
             
             if self.leader:
                 self.current_accept_msg = AcceptMessage(self.id, self.proposal_id, self.proposed_value, slot)
@@ -53,7 +53,7 @@ class Proposer ():
         self.observe_proposal( message.proposal_id )
 
         if not self.leader and message.proposal_id == self.proposal_id and message.acceptor_id not in self.promises_received:
-
+            #print("going to add to the promises list")
             self.promises_received.add( message.acceptor_id )
 
             if message.last_accepted_id is not None and (self.highest_accepted_id is None or message.last_accepted_id > self.highest_accepted_id):

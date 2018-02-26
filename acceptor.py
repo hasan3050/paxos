@@ -5,7 +5,7 @@ class Acceptor ():
         self.id             = id
         self.promised_id    = promised_id
         self.accepted_id    = accepted_id
-        self.accepted_value = accepted_value
+        self.accepted_value = accepted_value #<client_id, client_sequence, message>
 
     def receive_prepare(self, message):
         if self.promised_id is None or message.proposal_id >= self.promised_id:

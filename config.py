@@ -5,6 +5,6 @@ replicas = {
 }
 
 clients = {
-    0:("127.0.0.1", 9200, "./logs/client_0.json"),
-    1:("127.0.0.1", 9202, "./logs/client_0.json")
+    0:("127.0.0.1", 9200, "./logs/client_0.json", 0.1, 0.5),
+    1:("127.0.0.1", 9202, "./logs/client_0.json", 0.1, 0.5)
 }

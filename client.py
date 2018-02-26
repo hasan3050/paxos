@@ -7,14 +7,10 @@ import config;
 from message_type import *;
 from utils import *;
 from twisted.internet.protocol import DatagramProtocol
-from twisted.internet import reactor;
-
-#To Do: Add timeout event at client, after a timeout, the client will broadcast LEADER_QUERY message to learn who is the current leader. Once learnt, it will re-transmit the message
-
-#To Do: include message loss, introduce p, at _send function, check a random variable, if it is less then p, do nothing.
+from twisted.internet import reactor, task;
 
 class ClientDatagramProtocol(DatagramProtocol):
-    def __init__(self, id, host, port, replicas, log):
+    def __init__(self, id, host, port, replicas, log, p = 0, timeout = 0.5):
         self.id = id;
         self.host = host;
         self.port = port;
@@ -27,6 +23,11 @@ class ClientDatagramProtocol(DatagramProtocol):
         self.message = None;
         self.leader_ask_sequence = 0;
         self.leader_ask_response = {};
+        self.p = p;
+        self.client_message_watch = None
+        self.leader_ask_watch = None
+        self.client_message_timeout = timeout #in second
+        self.leader_ask_timeout = timeout #in second
         
     def get_init_history(self): 
         return {"sent":{},"accepted":{}, "last_sequence": 0, "last_leader": 0}
@@ -93,17 +94,15 @@ class ClientDatagramProtocol(DatagramProtocol):
         #self.transport.connect(self.host, self.port);
         print("Client #%d initiated at %s %d" % (self.id, self.host,self.port));
         self.load_state();
-        if len(self.history["sent"]):
-            first_failed_sent = list(self.history["sent"].items())[0];
-            client_message = self.generate_client_message(message = first_failed_sent[1], sequence = int(first_failed_sent[0]));
-            self.send_client_message(client_message, self.leader);
+        if len(self.history["sent"]) > 0:
+            self.send_unresolved_client_message();
         else:
             client_message = self.generate_client_message();
             self.send_client_message(client_message, self.leader)
         # self.broadcast_leader_query_message();
     
     def datagramReceived(self, data, from_address):
-        print("Client received %r from %s:%d" % (data.decode(), from_address[0], from_address[1]));
+        #print("Client received %r from %s:%d" % (data.decode(), from_address[0], from_address[1]));
         if data.decode() is not None:
             message_tokens = data.decode().split(' ');
             message_type = int(message_tokens[0]);
@@ -113,21 +112,29 @@ class ClientDatagramProtocol(DatagramProtocol):
 
             if message_type == MessageType.DONE.value:
                 self.receive_done(data.decode(), from_address);
+                print("Client received done message %r from %s:%d" % (data.decode(), from_address[0], from_address[1]));
 
             if message_type == MessageType.LEADER_INFO.value:
                 self.receive_leader_info(data.decode(), from_address);
                 
     def _send(self, message, to_id):
-        to_address = (self.replicas[to_id][0], self.replicas[to_id][1]);
-        #print("sending this message {0} to {1}:{2}".format(message, to_address[0], to_address[1]))
-        self.transport.write( message.encode(), to_address);
+        random_number = random.random();
+        if self.p < random_number:
+            to_address = (self.replicas[to_id][0], self.replicas[to_id][1]);
+            #print("sending this message {0} to {1}:{2}".format(message, to_address[0], to_address[1]))
+            self.transport.write( message.encode(), to_address);
     
     def broadcast_leader_query_message(self):
+        self.stop_client_message_watch();
+        self.stop_leader_ask_watch();
+
         self.leader_ask_sequence += 1;
         self.leader_ask_response = {};
         leader_query_message = LeaderQueryMessage(self.id, self.leader_ask_sequence, self.leader, True);
         for replica_id in self.replicas:
             self._send(str(leader_query_message), replica_id);
+        
+        self.start_leader_ask_watch();
 
     def receive_leader_info(self, message, from_address):
         leader_info = parse_str_message(message, MessageClass.LEADER_INFO_MESSAGE.value);
@@ -143,12 +150,49 @@ class ClientDatagramProtocol(DatagramProtocol):
             self.leader = int(leader_info.leader_id);
             self.leader_ask_sequence += 1;
             self.leader_ask_response = {};
+            self.stop_leader_ask_watch();
+            self.send_unresolved_client_message();
         return;
 
     def send_client_message(self, client_message, replica_id):
+        self.stop_client_message_watch();
         self._send(str(client_message), replica_id);
         self.update_history("sent", client_message.client_sequence, client_message.message);
+        self.start_client_message_watch();
+    
+    def send_unresolved_client_message(self):
+        if len(self.history["sent"]) > 0:
+            first_failed_sent = list(self.history["sent"].items())[0];
+            client_message = self.generate_client_message(message = first_failed_sent[1], sequence = int(first_failed_sent[0]));
+            self.send_client_message(client_message, self.leader);
 
+    def start_client_message_watch(self):
+        self.stop_client_message_watch();
+        self.client_message_watch = reactor.callLater(self.client_message_timeout, self.resolve_client_message_timeout);
+
+    def stop_client_message_watch(self):
+        if self.client_message_watch is not None and self.client_message_watch.active():
+            self.client_message_watch.cancel();
+            self.client_message_watch = None;
+
+    def start_leader_ask_watch(self):
+        self.stop_leader_ask_watch();
+        self.leader_ask_watch = reactor.callLater(self.leader_ask_timeout, self.resolve_leader_ask_timeout);
+
+    def stop_leader_ask_watch(self):
+        if self.leader_ask_watch is not None and self.leader_ask_watch.active():
+            self.leader_ask_watch.cancel();
+            self.leader_ask_watch = None;
+
+    def resolve_client_message_timeout(self):
+        self.stop_leader_ask_watch();
+        self.stop_client_message_watch();
+        self.broadcast_leader_query_message();
+
+    def resolve_leader_ask_timeout(self):
+        self.stop_leader_ask_watch();
+        self.stop_client_message_watch();
+        self.broadcast_leader_query_message();
     # def broadcast_client_message(self):
     #     client_message = self.generate_client_message();
         
@@ -178,13 +222,15 @@ def main():
     id = 0;
     log_filename = '';
     is_in_config = False;
+    p = 0;
+    timeout = 0.5;
 
     if "id" in argv and argv["id"].isdigit():
         if int(argv["id"]) in config.clients:
             id = int(argv["id"]);
             is_in_config = True;
     else:
-        print("Usage: python3 ./client.py --id <integer> --host <ip address, optional> --port <integer, optional>");
+        print("Usage: python3 ./client.py --id <integer> --host <ip address, optional> --port <integer, optional> --p <float, optional> --timeout <float, optional>");
         return -1;
     
     if "host" in argv and is_valid_ip(argv["host"]):
@@ -196,6 +242,16 @@ def main():
         port = int(argv["port"]);
     elif is_in_config:
         port = config.clients[id][1];
+
+    if "p" in argv and is_number(argv["p"]):
+        p = float(argv["p"]);
+    elif is_in_config:
+        p = float(config.clients[id][3]);
+
+    if "timeout" in argv and is_number(argv["timeout"]):
+        timeout = float(argv["timeout"]);
+    elif is_in_config:
+        timeout = float(config.clients[id][4]);
     
     if "log" in argv:
         log = argv["log"];
@@ -208,7 +264,7 @@ def main():
         print("Invalid id, could not found configure info");
         return -1;
 
-    reactor.listenUDP(port, ClientDatagramProtocol(id, host, port, config.replicas, log));
+    reactor.listenUDP(port, ClientDatagramProtocol(id, host, port, config.replicas, log, p, timeout));
 
 reactor.callWhenRunning(main)
 reactor.run();

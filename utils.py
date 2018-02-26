@@ -17,3 +17,9 @@ def is_valid_ip(ip):
         return True;
     else:
         return False;
+def is_number(n):
+    try:
+        float(n)   
+    except ValueError:
+        return False
+    return True

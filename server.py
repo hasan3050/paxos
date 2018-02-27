@@ -17,7 +17,7 @@ class MessagePoolState(Enum):
     PROPOSED = 1
 
 class ServerDatagramProtocol(DatagramProtocol):
-    def __init__(self, id, host, port, log, replicas, p=0, timeout=0.5, f=1, k=1000):
+    def __init__(self, id, host, port, log, replicas, p=0, timeout=0.5, f=1, k=1000, print_heart_beat = True):
         self.id = id;
         self.host = host;
         self.port = port;
@@ -34,6 +34,7 @@ class ServerDatagramProtocol(DatagramProtocol):
         self.message_pool = {}; #{slot : (client_message, new/sent)}
         self.p = p;
         self.k = k;
+        self.print_heart_beat = print_heart_beat;
         self.propose_timeout = timeout;
         self.heart_beat_interval = 1; #1 sec
         self.print_log_interval = 5; #5 sec
@@ -84,7 +85,7 @@ class ServerDatagramProtocol(DatagramProtocol):
         #print(self.history);
 
     def advance_slot(self, prev_slot, client_message):
-        print("replica #{0} has accepted {1} at slot#{2}".format(self.id, client_message.message, prev_slot));
+        #print("replica #{0} has accepted {1} at slot#{2}".format(self.id, client_message.message, prev_slot));
         self.add_to_history_accepted(client_message, prev_slot);
         self.remove_from_message_pool(prev_slot);
         self.slot = prev_slot + 1;
@@ -230,8 +231,9 @@ class ServerDatagramProtocol(DatagramProtocol):
 
     def receive_heart_beat(self, message, from_address):
         heart_beat = parse_str_message(message, MessageClass.HEART_BEAT_MESSAGE.value);
-        # print("Replica #{0} received heart beat of Replica #{1}. leader {2} is {3} next leader {4}".format(
-        #    self.id, heart_beat.id, heart_beat.leader, heart_beat.leader_is_alive, heart_beat.next_leader))
+        if self.print_heart_beat is True:
+            print("Replica #{0} received heart beat of Replica #{1}. leader {2} is {3} next leader {4}".format(
+                self.id, heart_beat.id, heart_beat.leader, heart_beat.leader_is_alive, heart_beat.next_leader))
         heart_beat.received_heart_beat = self.heart_beat;
         self.replica_status["heart_beat"][heart_beat.id] = heart_beat;
     
@@ -255,6 +257,7 @@ class ServerDatagramProtocol(DatagramProtocol):
         if self.heart_beat - update_unchosen_message.at_heart_beat <= self.max_heart_beat_miss:
             if str(update_unchosen_message.slot) not in self.history["states"]:
                 self.history["states"][str(update_unchosen_message.slot)] = update_unchosen_message.value;
+                self.save_state();
 
     def set_active_replicas(self):
         self.replica_status["active"] = [];
@@ -452,7 +455,7 @@ class ServerDatagramProtocol(DatagramProtocol):
             self._send( str(accept_message), replica_id);
     
     def receive_accept(self, message, from_address):
-        print("replica #%d received accept message %r" % (self.id, message));
+        #print("replica #%d received accept message %r" % (self.id, message));
 
         accept_message = parse_str_message(message, MessageClass.ACCEPT_MESSAGE.value);
         
@@ -522,7 +525,7 @@ def main():
         print("Usage: python3 ./server.py --id <integer, required> " +\
             "--host <ip address, optional> --port <integer, optional> "+\
             "--log <string, optional> --p <float, optional> --timeout <float, optional> " +\
-            "--f <integer, optional>");
+            "--f <integer, optional> --k <integer, optional> --print_heart_beat <true/false, optional>");
         return -1;
     
     if "host" in argv and is_valid_ip(argv["host"]):
@@ -552,7 +555,7 @@ def main():
     elif is_in_config:
         f = int(config.f);
         
-    if "k" in argv and is_number(argv["k"]):
+    if "k" in argv and argv["k"].isdigit():
         k = int(argv["k"]);
     elif is_in_config:
         k = int(config.k);
@@ -562,11 +565,16 @@ def main():
     elif is_in_config:
         timeout = float(config.replicas[id][4]);
 
+    if "print_heart_beat" in argv:
+        print_heart_beat = (argv["print_heart_beat"].lower() == "false");
+    elif is_in_config:
+        print_heart_beat = config.print_heart_beat;
+
     if not is_in_config and (host is None or port is None):
         print("Invalid id, could not found configure info");
         return -1;
     
-    reactor.listenUDP(port, ServerDatagramProtocol(id, host, port, log_filename, config.replicas, p, timeout, f, k));
+    reactor.listenUDP(port, ServerDatagramProtocol(id, host, port, log_filename, config.replicas, p, timeout, f, k, print_heart_beat));
 
 reactor.callWhenRunning(main)
 reactor.run();

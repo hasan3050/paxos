@@ -20,3 +20,4 @@ clients = {
 f = 1
 k = 10
 total_message = 100
+print_heart_beat = True

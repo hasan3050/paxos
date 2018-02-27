@@ -1,10 +1,10 @@
 import os
 import commands
 
-NumofReplicas = 4
+NumofReplicas = 6
 NumofClients = 2
 
-def create_replicas(_NumofReplicas = 4):
+def create_replicas(_NumofReplicas = 6):
 	_port = 9100
 	_id = 0
 	_p = 0
@@ -13,6 +13,7 @@ def create_replicas(_NumofReplicas = 4):
 
 	for server in range(_NumofReplicas):
 		cmd = "kill $(lsof -t -i:{0}) && python3 ./server.py --id {1} --host {2} --port {3} --p {4} --timeout {5} &".format(_p, _id, _host, _port, _p, _timeout)
+		#cmd = "kill $(lsof -t -i:{0})".format(_port)
 		print (os.system(cmd))
 		_id += 1
 		_port += 2
@@ -26,6 +27,7 @@ def create_clients(_NumofClients = 2):
 
 	for server in range(_NumofClients):
 		cmd = "kill $(lsof -t -i:{0}) && python3 ./client.py --id {1} --host {2} --port {3} --p {4} --timeout {5} &".format(_p, _id, _host, _port, _p, _timeout)
+		#cmd = "kill $(lsof -t -i:{0})".format(_port)
 		print (os.system(cmd))
 		_id += 1
 		_port += 2

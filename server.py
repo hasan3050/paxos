@@ -23,7 +23,7 @@ class ServerDatagramProtocol(DatagramProtocol):
         self.port = port;
         self.log = log;
         self.replicas = replicas;
-        self.quorum_size = 2*f + 1;#int(len(self.replicas)/2)+1;
+        self.quorum_size = f + 1;#int(len(self.replicas)/2)+1;
         self.history = self.get_init_history();
         self.heart_beat = 0;
         self.leader = 0;

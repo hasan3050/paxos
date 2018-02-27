@@ -10,7 +10,7 @@ from twisted.internet.protocol import DatagramProtocol
 from twisted.internet import reactor, task;
 
 class ClientDatagramProtocol(DatagramProtocol):
-    def __init__(self, id, host, port, replicas, log, p = 0, timeout = 0.5, f=1):
+    def __init__(self, id, host, port, replicas, log, p = 0, timeout = 0.5, f=1, total_message = 100):
         self.id = id;
         self.host = host;
         self.port = port;
@@ -24,6 +24,7 @@ class ClientDatagramProtocol(DatagramProtocol):
         self.leader_ask_sequence = 0;
         self.leader_ask_response = {};
         self.p = p;
+        self.total_message = total_message;
         self.client_message_watch = None
         self.leader_ask_watch = None
         self.client_message_timeout = timeout #in second
@@ -212,9 +213,9 @@ class ClientDatagramProtocol(DatagramProtocol):
         done_message = parse_str_message(message, MessageClass.DONE_MESSAGE.value);
         self.update_history("accepted", done_message.client_sequence, done_message.message);
 
-        #if self.sequence < 5 :
-        client_message = self.generate_client_message();
-        self.send_client_message(client_message, self.leader);
+        if self.sequence < self.total_message :
+            client_message = self.generate_client_message();
+            self.send_client_message(client_message, self.leader);
 
 
 def main():
@@ -227,13 +228,14 @@ def main():
     p = 0;
     f = 1;
     timeout = 0.5;
+    total_message = 100;
 
     if "id" in argv and argv["id"].isdigit():
         if int(argv["id"]) in config.clients:
             id = int(argv["id"]);
             is_in_config = True;
     else:
-        print("Usage: python3 ./client.py --id <integer> --host <ip address, optional> --port <integer, optional> --p <float, optional> --timeout <float, optional>");
+        print("Usage: python3 ./client.py --id <integer> --host <ip address, optional> --port <integer, optional> --p <float, optional> --timeout <float, optional> --f <int, optional> --total_message <int, optional>" );
         return -1;
     
     if "host" in argv and is_valid_ip(argv["host"]):
@@ -268,11 +270,16 @@ def main():
     elif is_in_config:
         f = int(config.f);
 
+    if "total_message" in argv and is_number(argv["total_message"]):
+        total_message = int(argv["total_message"]);
+    elif is_in_config:
+        total_message = int(config.total_message);
+
     if not is_in_config and (host is None or port is None):
         print("Invalid id, could not found configure info");
         return -1;
 
-    reactor.listenUDP(port, ClientDatagramProtocol(id, host, port, config.replicas, log, p, timeout, f));
+    reactor.listenUDP(port, ClientDatagramProtocol(id, host, port, config.replicas, log, p, timeout, f, total_message));
 
 reactor.callWhenRunning(main)
 reactor.run();

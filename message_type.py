@@ -12,6 +12,7 @@ class MessageType(Enum):
     LEADER_QUERY = 8
     LEADER_INFO = 9
     HEART_BEAT = 10
+    UPDATE_UNCHOSEN = 11
 
 class MessageClass(Enum):
     CLIENT_MESSAGE = 0
@@ -25,6 +26,7 @@ class MessageClass(Enum):
     LEADER_QUERY_MESSAGE = 8
     LEADER_INFO_MESSAGE = 9
     HEART_BEAT_MESSAGE = 10
+    UPDATE_UNCHOSEN_MESSAGE = 11
 
 class ClientMessage:
     def __init__(self, client_id, client_sequence, message):
@@ -170,6 +172,19 @@ class HeartBeatMessage:
             self.leader, self.leader_is_alive, self.next_leader,
             self.slot, self.first_unchosen_slot ,self.round);
 
+class UpdateUnchosenMessage:
+    def __init__(self, leader_id, at_heart_beat, slot, value):
+        self.leader_id = leader_id;
+        self.at_heart_beat = at_heart_beat;
+        self.slot = slot;
+        self.value = value;
+        self.message_type = MessageType.UPDATE_UNCHOSEN.value;
+    
+    def __str__(self):
+        return "{0} {1} {2} {3} {4}".format(
+            self.message_type, self.leader_id, self.at_heart_beat,
+            self.slot, self.value);
+
 class Resolution:
     def __init__(self, id, accepted_value, slot):
         self.id = id;
@@ -219,3 +234,7 @@ def parse_str_message(message, message_class):
     elif message_class == MessageClass.HEART_BEAT_MESSAGE.value and tokens is not None and len(tokens) == 9:
         #id, heart_beat, leader, leader_is_alive, next_leader, slot, first_unchosen_slot, round
         return HeartBeatMessage( int(tokens[1]), int(tokens[2]), int(tokens[3]), tokens[4] == "True", int(tokens[5]), int(tokens[6]), int(tokens[7]), int(tokens[8]) );
+
+    elif message_class == MessageClass.UPDATE_UNCHOSEN_MESSAGE.value and tokens is not None and len(tokens) == 5:
+        #leader_id, at_heart_beat, slot, value
+        return UpdateUnchosenMessage(int(tokens[1]), int(tokens[2]), int(tokens[3]), tokens[4]);

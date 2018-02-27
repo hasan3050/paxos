@@ -17,7 +17,7 @@ class MessagePoolState(Enum):
     PROPOSED = 1
 
 class ServerDatagramProtocol(DatagramProtocol):
-    def __init__(self, id, host, port, log, replicas, p=0, timeout=0.5, f=1):
+    def __init__(self, id, host, port, log, replicas, p=0, timeout=0.5, f=1, k=1000):
         self.id = id;
         self.host = host;
         self.port = port;
@@ -32,7 +32,8 @@ class ServerDatagramProtocol(DatagramProtocol):
         self.slot = 0;
         self.first_unchosen_slot = 0;
         self.message_pool = {}; #{slot : (client_message, new/sent)}
-        self.p = 0;
+        self.p = p;
+        self.k = k;
         self.propose_timeout = timeout;
         self.heart_beat_interval = 1; #1 sec
         self.print_log_interval = 5; #5 sec
@@ -113,10 +114,13 @@ class ServerDatagramProtocol(DatagramProtocol):
 
     def add_to_message_pool(self, client_message):
         if self.message_pool is None:
-            self. message_pool = {};
-        if self.slot not in self.message_pool:
-            self.message_pool[self.slot] = (client_message, MessagePoolState.NEW.value);
-            self.slot += 1; 
+            self.message_pool = {};
+        slot = self.slot;
+        if slot == self.k:
+            slot += 1;
+        if slot not in self.message_pool:
+            self.message_pool[slot] = (client_message, MessagePoolState.NEW.value);
+            self.slot = slot + 1; 
     
     def remove_from_message_pool(self, slot):
         if self.message_pool is None or slot not in self.message_pool:
@@ -152,6 +156,13 @@ class ServerDatagramProtocol(DatagramProtocol):
             wait_message = self.message_pool[slot][0];
             if wait_message.client_id == client_message.client_id and wait_message.client_sequence == client_message.client_sequence:
                 return True
+    
+    def update_message_state_in_pool(self, client_message):
+        for slot in self.message_pool:
+            wait_message = self.message_pool[slot][0];
+            if wait_message.client_id == client_message.client_id and wait_message.client_sequence == client_message.client_sequence:
+                self.message_pool[slot] = (wait_message, MessagePoolState.NEW.value);
+                return;
 
     def start_heart_beat(self):
         if self.heart_beat_watch is None:
@@ -164,9 +175,12 @@ class ServerDatagramProtocol(DatagramProtocol):
             self.print_log_watch.start(self.print_log_interval);
     
     def print_log(self):
-        values = list(self.history["states"].values());
+        items = sorted(self.history["states"].items(), key = lambda x: int (x[0]));
+        log = ""
         print("*************log of replica #{0}*************".format(self.id));
-        print("".join(values));
+        for item in items:
+            log += " {0}:{1} ".format(item[0], item[1]);
+        print(log);
 
     def startProtocol(self):
         print("Server #%d initiated at %s %d" % (self.id, self.host,self.port));
@@ -201,6 +215,9 @@ class ServerDatagramProtocol(DatagramProtocol):
             
             elif message_type == MessageType.HEART_BEAT.value:
                 self.receive_heart_beat(data.decode(), from_address);
+            
+            elif message_type == MessageType.UPDATE_UNCHOSEN.value:
+                self.receive_update_unchosen(data.decode(), from_address);
 
     def _send(self, message, to_id, is_client=False):
         random_number = random.random();
@@ -213,20 +230,31 @@ class ServerDatagramProtocol(DatagramProtocol):
 
     def receive_heart_beat(self, message, from_address):
         heart_beat = parse_str_message(message, MessageClass.HEART_BEAT_MESSAGE.value);
-        print("Replica #{0} received heart beat of Replica #{1}. leader {2} is {3} next leader {4}".format(
-           self.id, heart_beat.id, heart_beat.leader, heart_beat.leader_is_alive, heart_beat.next_leader))
+        # print("Replica #{0} received heart beat of Replica #{1}. leader {2} is {3} next leader {4}".format(
+        #    self.id, heart_beat.id, heart_beat.leader, heart_beat.leader_is_alive, heart_beat.next_leader))
         heart_beat.received_heart_beat = self.heart_beat;
         self.replica_status["heart_beat"][heart_beat.id] = heart_beat;
     
     def send_heart_beat(self):
         self.set_active_replicas();
+        first_unchosen_slot = self.get_slot_from_history()[0];
         heart_beat = HeartBeatMessage(
             self.id, self.heart_beat, self.leader, self.leader_is_alive, self.get_next_leader(), 
-            self.slot, self.first_unchosen_slot, self.paxos.highest_proposal_id[0]);
+            self.slot, first_unchosen_slot, self.paxos.highest_proposal_id[0]);
         
         for replica_id in self.replicas:
             self._send(str(heart_beat), replica_id);
         self.heart_beat += 1;
+    
+    def send_update_unchosen(self, leader_id, at_heart_beat, slot, value, replica_id):
+        update_unchosen_message = UpdateUnchosenMessage(leader_id, at_heart_beat, slot, value);
+        self._send(str(update_unchosen_message), replica_id);
+
+    def receive_update_unchosen(self, message, from_address):
+        update_unchosen_message = parse_str_message(message, MessageClass.UPDATE_UNCHOSEN_MESSAGE.value);
+        if self.heart_beat - update_unchosen_message.at_heart_beat <= self.max_heart_beat_miss:
+            if str(update_unchosen_message.slot) not in self.history["states"]:
+                self.history["states"][str(update_unchosen_message.slot)] = update_unchosen_message.value;
 
     def set_active_replicas(self):
         self.replica_status["active"] = [];
@@ -241,7 +269,7 @@ class ServerDatagramProtocol(DatagramProtocol):
                 self.leader_is_alive = False;
 
         current_active_leader = self.get_current_active_leader();
-        if current_active_leader != -1:
+        if current_active_leader != -1:# and self.leader_is_alive == False and current_active_leader != self.leader:
             self.update_paxos(current_active_leader, self.leader);
             self.leader = current_active_leader;
             self.leader_is_alive = (current_active_leader in self.replica_status["active"]);
@@ -251,7 +279,27 @@ class ServerDatagramProtocol(DatagramProtocol):
                 self.update_paxos(next_probable_leader, self.leader);
                 self.leader = next_probable_leader;
                 self.leader_is_alive = True;
+        
+        self.first_unchosen_slot = self.get_slot_from_history()[0];
+        if self.paxos.leader is True:
+            self.check_for_unchosen_update();
     
+    def check_for_unchosen_update(self):
+        if self.paxos.leader is False:
+            return;
+
+        for id in self.replica_status["heart_beat"] :
+            message = self.replica_status["heart_beat"][id];            
+            delay = self.heart_beat - message.received_heart_beat;         
+            if delay <= self.max_heart_beat_miss :
+                if message.first_unchosen_slot < self.first_unchosen_slot:
+                    self.send_update_unchosen(
+                        self.id, 
+                        message.heart_beat, 
+                        message.first_unchosen_slot, 
+                        self.history["states"][str(message.first_unchosen_slot)], 
+                        message.id);
+
     def go_for_leader(self, leader):
         next_probable_leader = leader;
         leader_consensus = {};
@@ -302,6 +350,13 @@ class ServerDatagramProtocol(DatagramProtocol):
                 self.paxos.leader = False;
         if new_leader == self.id:
             self.paxos.leader = True;
+            unchosen_slot = self.get_slot_from_history()[0];
+            #print(unchosen_slot, self.slot);
+            while(unchosen_slot < self.slot):
+                if str(unchosen_slot) not in self.history["states"]:
+                    self.history["states"][str(unchosen_slot)] = '-';
+                unchosen_slot = self.get_slot_from_history()[0];
+                #print(unchosen_slot, self.slot);
     
     def receive_propose(self, message, from_address):
         #<message_type, client_id, sequence, message, replica_id>
@@ -312,6 +367,8 @@ class ServerDatagramProtocol(DatagramProtocol):
         if self.paxos.leader:
             if self.check_new_client_message(client_message):
                 if self.is_message_in_pool(client_message) is True:
+                    # self.update_message_state_in_pool();
+                    # self.propose_next_message();
                     return;
                 self.add_to_message_pool(client_message);
                 print("replica #%d received propose message %r from %s:%d" % (self.id, message, from_address[0], from_address[1]));
@@ -494,6 +551,11 @@ def main():
         f = int(argv["f"]);
     elif is_in_config:
         f = int(config.f);
+        
+    if "k" in argv and is_number(argv["k"]):
+        k = int(argv["k"]);
+    elif is_in_config:
+        k = int(config.k);
 
     if "timeout" in argv and is_number(argv["timeout"]):
         timeout = float(argv["timeout"]);
@@ -504,7 +566,7 @@ def main():
         print("Invalid id, could not found configure info");
         return -1;
     
-    reactor.listenUDP(port, ServerDatagramProtocol(id, host, port, log_filename, config.replicas, p, timeout, f));
+    reactor.listenUDP(port, ServerDatagramProtocol(id, host, port, log_filename, config.replicas, p, timeout, f, k));
 
 reactor.callWhenRunning(main)
 reactor.run();

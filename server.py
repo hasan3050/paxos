@@ -284,12 +284,12 @@ class ServerDatagramProtocol(DatagramProtocol):
                 self.leader_is_alive = True;
         
         self.first_unchosen_slot = self.get_slot_from_history()[0];
-        if self.paxos.leader is True:
-            self.check_for_unchosen_update();
+        # if self.paxos.leader is True:
+        self.check_for_unchosen_update();
     
     def check_for_unchosen_update(self):
-        if self.paxos.leader is False:
-            return;
+        # if self.paxos.leader is False:
+        #     return;
 
         for id in self.replica_status["heart_beat"] :
             message = self.replica_status["heart_beat"][id];            
@@ -340,10 +340,16 @@ class ServerDatagramProtocol(DatagramProtocol):
         total_replica = len(self.replicas);
         active_ids = list(set(self.replica_status["active"]));
         
-        for i in range(1, total_replica):
-            probable_replica = (self.leader + i) % total_replica; 
-            if probable_replica in active_ids:
-                return probable_replica;
+        # this is for the round robin system
+        # for i in range(1, total_replica):
+        #     probable_replica = (self.leader + i) % total_replica; 
+        #     if probable_replica in active_ids:
+        #         return probable_replica;
+
+        #this is for the next big replica
+        if len(active_ids) > 0:
+            probable_leader = active_ids[len(active_ids) - 1];
+            return probable_leader;
         
         return -1;
 
@@ -447,7 +453,8 @@ class ServerDatagramProtocol(DatagramProtocol):
     def receive_nack(self, message, from_address):
         # print("replica #%d received nack message %r" % (self.id, message));
         #To Do: need to implement receive nack logic
-        return
+        nack_message = parse_str_message(message, MessageClass.NACK_MESSAGE.value);
+        self.paxos.receive_nack(nack_message)
 
     def send_accept(self, accept_message):
         print("replica #%d sent accept message %s" % (self.id, str(accept_message)));

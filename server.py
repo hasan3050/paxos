@@ -42,7 +42,8 @@ class ServerDatagramProtocol(DatagramProtocol):
         self.heart_beat_watch = None;
         self.print_log_watch = None;
         self.replica_status = {"heart_beat": {}, "active": []};
-
+        self.propose_watch = None;
+        
     def get_init_history(self): 
         return {
             "states": {}, # {slot:value}
@@ -376,8 +377,8 @@ class ServerDatagramProtocol(DatagramProtocol):
         if self.paxos.leader:
             if self.check_new_client_message(client_message):
                 if self.is_message_in_pool(client_message) is True:
-                    # self.update_message_state_in_pool();
-                    # self.propose_next_message();
+                    self.update_message_state_in_pool();
+                    self.propose_next_message();
                     return;
                 self.add_to_message_pool(client_message);
                 print("replica #%d received propose message %r from %s:%d" % (self.id, message, from_address[0], from_address[1]));

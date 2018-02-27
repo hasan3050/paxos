@@ -71,6 +71,9 @@ class ServerDatagramProtocol(DatagramProtocol):
                 self.leader = int(self.history["last_leader"]);
                 (self.first_unchosen_slot, self.slot) = self.get_slot_from_history(history["states"]);
                 #TO DO: Update paxos variables
+                highest_proposal_id = history["highest_proposal_id"];
+                if not highest_proposal_id is None:
+                    self.paxos.highest_proposal_id = (int(highest_proposal_id[0]), int(highest_proposal_id[1]));
             except Exception:
                 print("Failed to read log file. Initiating from the beginning");
                 self.history = self.get_init_history();
@@ -79,7 +82,8 @@ class ServerDatagramProtocol(DatagramProtocol):
     
     def save_state(self):
         self.has_log_file();
-        
+        self.history["last_leader"] = self.leader;
+        self.history["highest_proposal_id"] = self.paxos.highest_proposal_id;
         with open(self.log, "w+") as log:
             json.dump(self.history, log, indent=4);
         
@@ -312,13 +316,17 @@ class ServerDatagramProtocol(DatagramProtocol):
 
         for id in self.replica_status["heart_beat"] :
             message = self.replica_status["heart_beat"][id];
-            if (message.leader_is_alive is False and message.next_leader == next_probable_leader) or (message.leader_is_alive is True and message.leader == next_probable_leader): 
+            if (message.leader_is_alive is False and message.next_leader == next_probable_leader) or (
+                message.leader_is_alive is True and message.leader == next_probable_leader): 
                 if next_probable_leader not in leader_consensus:
                     leader_consensus[next_probable_leader] = 1;
                 else:
                     leader_consensus[next_probable_leader] += 1;
                 if leader_consensus[next_probable_leader] >= self.quorum_size:
                     return True;
+        
+        # if (leader_consensus[next_probable_leader] == (self.quorum_size - 1)) and (self.leader != next_probable_leader) and (self.replica_status["heart_beat"][next_probable_leader].heart_beat - self.heart_beat) >= self.max_heart_beat_miss):
+        #     return True;
         return False;
 
     def get_current_active_leader(self):        
@@ -377,7 +385,7 @@ class ServerDatagramProtocol(DatagramProtocol):
         if self.paxos.leader:
             if self.check_new_client_message(client_message):
                 if self.is_message_in_pool(client_message) is True:
-                    self.update_message_state_in_pool();
+                    self.update_message_state_in_pool(client_message);
                     self.propose_next_message();
                     return;
                 self.add_to_message_pool(client_message);

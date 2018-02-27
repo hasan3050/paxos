@@ -4,7 +4,7 @@ import commands
 NumofReplicas = 4
 NumofClients = 2
 
-def create_replicas(_NumofReplicas = 6):
+def create_replicas(_NumofReplicas = 4):
 	_port = 9100
 	_id = 0
 	_p = 0

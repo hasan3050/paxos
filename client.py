@@ -17,7 +17,7 @@ class ClientDatagramProtocol(DatagramProtocol):
         self.log = log;
         self.history = self.get_init_history();
         self.replicas = replicas;
-        self.quorum_size = 2*f+1;#int(len(self.replicas)/2)+1;
+        self.quorum_size = f+1;#int(len(self.replicas)/2)+1;
         self.leader = 0;
         self.sequence = 0;
         self.message = None;

@@ -350,15 +350,15 @@ class ServerDatagramProtocol(DatagramProtocol):
         active_ids = list(set(self.replica_status["active"]));
         
         # this is for the round robin system
-        # for i in range(1, total_replica):
-        #     probable_replica = (self.leader + i) % total_replica; 
-        #     if probable_replica in active_ids:
-        #         return probable_replica;
+        for i in range(1, total_replica):
+             probable_replica = (self.leader + i) % total_replica; 
+             if probable_replica in active_ids:
+                 return probable_replica;
 
         #this is for the next big replica
-        if len(active_ids) > 0:
-            probable_leader = active_ids[len(active_ids) - 1];
-            return probable_leader;
+        #if len(active_ids) > 0:
+        #    probable_leader = active_ids[len(active_ids) - 1];
+        #    return probable_leader;
         
         return -1;
 
